@@ -112,6 +112,30 @@ def _parse_cookie_text(cookie_text: str) -> dict[str, str]:
     return result
 
 
+def _extract_object_by_balance(text: str, start_marker: str) -> Optional[str]:
+    """从文本中提取平衡的大括号对象字符串。"""
+    start_idx = text.find(start_marker)
+    if start_idx == -1:
+        return None
+    
+    # 找到第一次出现 { 的位置
+    brace_start = text.find("{", start_idx)
+    if brace_start == -1:
+        return None
+        
+    count = 0
+    # 简单的括号计数，未处理字符串内的括号，但对于 __INITIAL_STATE__ 这种大对象通常足够
+    for i in range(brace_start, len(text)):
+        char = text[i]
+        if char == "{":
+            count += 1
+        elif char == "}":
+            count -= 1
+            if count == 0:
+                return text[brace_start:i+1]
+    return None
+
+
 def _load_xhs_cookies_from_env() -> Optional[object]:
     """从环境变量读取 cookies。
 
@@ -371,6 +395,17 @@ def parse_xhs(url: str):
                     except Exception:
                         # 继续尝试下一个 script
                         continue
+                
+                # 3) 兜底方案：直接在 HTML 全文中搜索（解决 script.text 为空或截断的问题）
+                if data is None:
+                    html_full = page.html or ""
+                    # 尝试匹配 window.__INITIAL_STATE__=
+                    extracted_str = _extract_object_by_balance(html_full, "window.__INITIAL_STATE__=")
+                    if extracted_str:
+                        try:
+                            data = _parse_initial_state_expr(extracted_str)
+                        except Exception:
+                            pass
 
                 if data is None:
                     html_sample = (page.html or "")[:500]
@@ -422,6 +457,11 @@ def parse_xhs(url: str):
         return result
 
     except Exception as e:
+        try:
+            with open("debug_failed.html", "w", encoding="utf-8") as f:
+                f.write(page.html or "")
+        except Exception:
+            pass
         print(f"Error 发生: {str(e)}")
         raise e
     finally:
@@ -562,7 +602,9 @@ async def wait_login(timeout: int = 120):
 
             # 1) 弹层消失通常意味着登录完成或至少通过验证
             if not _page_has_lock_class(page, html):
-                cookies = page.cookies(all_domains=True) or []
+                cookies = page.cookies(all_domains=True, all_info=True) or []
+                _save_xhs_cookies_to_file(cookies)
+                
                 with _LOGIN_LOCK:
                     try:
                         _LOGIN_PAGE.quit()

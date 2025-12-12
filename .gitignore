@@ -1,0 +1,31 @@
+# =========================
+# Git 忽略规则
+# 说明：此文件用于忽略不应进入版本库的本地/临时/生成文件。
+# 参考：gitignore 模式语法（git 官方文档）
+# =========================
+
+# Cursor / SpecStory
+.specstory
+.specstory/
+
+# Node
+node_modules/
+
+# 构建产物
+dist/
+build/
+
+# 日志
+*.log
+logs/
+
+# 环境变量
+.env
+.env.*
+
+# 系统文件
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
