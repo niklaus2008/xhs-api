@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  # 服务 1: 小红书爬虫
+  xhs-service:
+    build: .
+    container_name: xhs-scraper
+    ports:
+      - "8000:8000"
+    environment:
+      # 持久化 Chromium 用户数据目录（用于复用登录态）
+      - XHS_USER_DATA_PATH=/data/chrome
+    volumes:
+      # 👇 关键：把宿主机的 chrome-data 映射进去，让容器“继承”你的登录状态
+      # 注意：这里要与 XHS_USER_DATA_PATH 保持一致（main.py 依赖它来启用持久化 Profile）
+      - ./chrome-data:/data/chrome 
+    restart: always
+
+  # 服务 2: n8n (根据你的 docker run 命令定制)
+  n8n:
+    image: n8nio/n8n:2.0.1
+    container_name: n8n-server  # 对应 --name n8n-server
+    ports:
+      - "5678:5678"             # 对应 -p 5678:5678
+    environment:
+      - GENERIC_TIMEZONE=Asia/Shanghai
+      - N8N_SECURE_COOKIE=false
+    volumes:
+      - n8n_data:/home/node/.n8n                 # 对应 -v n8n_data:/home/node/.n8n
+      # 👇 这里补充的本地路径映射
+      - /Users/liuqiang/code/data:/data_n8n      # 对应 -v /Users/liuqiang/code/data:/data_n8n
+    restart: unless-stopped     # 对应 --restart unless-stopped
+    depends_on:
+      - xhs-service             # 确保爬虫先启动
+
+# 定义数据卷
+volumes:
+  n8n_data:
+    external: true

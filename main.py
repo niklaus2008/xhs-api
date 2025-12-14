@@ -1,26 +1,54 @@
+"""
+XHS-API Service
+---------------
+基于 FastAPI 和 DrissionPage 构建的高性能小红书采集服务。
+
+核心特性：
+1. **高性能自动化**：利用 DrissionPage 直接控制浏览器内核，兼具 requests 的速度和 selenium 的渲染能力。
+2. **智能数据提取**：多维度的提取策略（JSON变量解析 -> 平衡括号匹配 -> 正则兜底），极大提高成功率。
+3. **登录态持久化**：支持扫码登录并自动维护 Cookie 池，通过 Docker Volume 实现重启不掉线。
+4. **易于集成**：提供标准的 RESTful API，可轻松接入 n8n、Dify 或其他工作流系统。
+
+Author: Your Name
+Version: 1.0.0
+"""
+
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import Response, JSONResponse
 from pydantic import BaseModel
 from DrissionPage import ChromiumPage, ChromiumOptions
 import json
 import uvicorn
-import re  # 引入正则表达式库，提取更稳
+import re
 import os
-import base64
 import time
 import threading
 import os.path
-from typing import Any, Optional
+from typing import Any, Optional, Dict
 
-app = FastAPI()
+app = FastAPI(
+    title="XHS Scraper API",
+    description="基于 DrissionPage 的小红书无头浏览器采集服务",
+    version="1.0.0"
+)
+
+@app.get("/")
+def root():
+    """服务健康检查与简介"""
+    return {
+        "service": "XHS-API Scraper",
+        "status": "running",
+        "docs": "/docs",
+        "powered_by": ["FastAPI", "DrissionPage"]
+    }
 
 class URLItem(BaseModel):
     url: str
 
+# ----------------------------
+# 登录会话管理 / Login Session
+# ----------------------------
 
-# ----------------------------
-# 登录会话（用于二维码扫码登录）
-# ----------------------------
 _LOGIN_LOCK = threading.Lock()
 _LOGIN_PAGE: Optional[ChromiumPage] = None
 _LOGIN_CREATED_AT: float = 0.0
