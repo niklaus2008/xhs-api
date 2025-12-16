@@ -92,37 +92,57 @@ def _parse_initial_state_expr(expr: str) -> dict[str, Any]:
 
 def _try_get_initial_data_from_runtime(page: ChromiumPage, timeout_sec: float = 8.0) -> Optional[dict[str, Any]]:
     """等待页面 JS 执行完成后，从运行时环境提取初始数据。
-
-    说明：部分站点不会把数据直接写进 HTML 内联 script，而是通过外链脚本执行后挂到 window 上，
-    或者把 Next.js 的数据放在 id="__NEXT_DATA__" 的 script 标签中（可能在稍后插入）。
+    
+    改进：不仅仅是拿到数据就返回，而是会轮询直到 data 中包含 'noteDetailMap' (即数据加载完全)，
+    或者超时为止。这样能防止在数据刚刚初始化但还未填充内容时过早返回。
     """
     step = 0.5
     tries = max(1, int(timeout_sec / step))
+    last_data = None
 
-    for _ in range(tries):
-        # 1) window.__INITIAL_STATE__（序列化为字符串再解析，避免 run_js 返回复杂对象类型差异）
+    for i in range(tries):
+        # 1) window.__INITIAL_STATE__
         try:
             state_json = page.run_js(
                 'return (window.__INITIAL_STATE__ ? JSON.stringify(window.__INITIAL_STATE__) : "");'
             )
             if isinstance(state_json, str) and state_json.strip():
-                return json.loads(state_json)
+                data = json.loads(state_json)
+                if _has_note_detail(data):
+                    print(f"DEBUG: 运行时数据完整 (第 {i+1} 次尝试)")
+                    return data
+                last_data = data
         except Exception:
             pass
 
-        # 2) __NEXT_DATA__（Next.js）
+        # 2) __NEXT_DATA__
         try:
             next_json = page.run_js(
                 'var e=document.getElementById("__NEXT_DATA__"); return e? (e.textContent || "") : "";'
             )
             if isinstance(next_json, str) and next_json.strip():
-                return json.loads(next_json)
+                data = json.loads(next_json)
+                if _has_note_detail(data):
+                     print(f"DEBUG: Next.js 数据完整 (第 {i+1} 次尝试)")
+                     return data
+                if last_data is None: 
+                    last_data = data
         except Exception:
             pass
 
         page.wait(step)
 
-    return None
+    print(f"DEBUG: 运行时数据轮询超时，返回最后一次捕获的数据 (完整性: {bool(last_data and _has_note_detail(last_data))})")
+    if last_data:
+        print(f"DEBUG: Runtime Data Keys: {list(last_data.keys())}")
+        # Add basic exception handling for potential logging errors to avoid disrupting main flow
+        try:
+             # Just logging keys for now, extensive file I/O removed per instructions
+             pass
+        except Exception as e:
+            print(f"DEBUG: Error logging runtime data keys: {e}")
+            
+    return last_data
 
 
 def _parse_cookie_text(cookie_text: str) -> dict[str, str]:
@@ -387,6 +407,7 @@ def parse_xhs(url: str):
         # 打印一下当前的标题，看看是不是遇到了验证码
         title = page.title
         print(f"2. 当前页面标题: {title}")
+        print(f"2.1 当前页面URL: {page.url}")
         
         if "验证" in title or "安全" in title:
              raise Exception(f"触发了小红书风控，页面标题为: {title}")
@@ -396,15 +417,18 @@ def parse_xhs(url: str):
 
         # 优先从运行时提取（适配“壳页面 + 外链脚本”场景）
         runtime_data = _try_get_initial_data_from_runtime(page, timeout_sec=8)
+        
+        # 决定是否使用运行时数据：既要非空，又要包含关键数据
+        use_runtime = False
         if runtime_data is not None:
-            # 关键：检查运行时数据是否完整。如果缺笔记详情，说明可能遇到风控或加载不全，
-            # 此时不要直接采信，而是尝试去 HTML 里或者 script 标签里找（那里往往有完整数据）。
             if _has_note_detail(runtime_data):
-                data = runtime_data
-                print("3. 使用运行时数据 (Runtime Data)")
+                use_runtime = True
             else:
-                print("3. 运行时数据缺失笔记详情，尝试降级到静态解析...")
-                data = None
+                print("3. ⚠️ 运行时数据存在但缺失笔记详情，将忽略并降级到静态解析...")
+        
+        if use_runtime:
+            data = runtime_data
+            print("3. 使用运行时数据 (Runtime Data)")
         else:
             # 优先尝试 Next.js 常见的 __NEXT_DATA__
             next_data_ele = page.ele('xpath://script[@id="__NEXT_DATA__"]')
@@ -438,8 +462,18 @@ def parse_xhs(url: str):
                     extracted_str = _extract_object_by_balance(html_full, "window.__INITIAL_STATE__=")
                     if extracted_str:
                         try:
+                            print(f"DEBUG: 尝试 HTML 平衡括号解析，长度: {len(extracted_str)}")
                             data = _parse_initial_state_expr(extracted_str)
-                        except Exception:
+                            # 调试输出
+                            if data:
+                                print(f"DEBUG: HTML解析成功，Keys: {list(data.keys())}")
+                                
+                                note_debug = data.get('note', {})
+                                print(f"DEBUG: Note Keys: {list(note_debug.keys())}")
+                                if 'noteDetailMap' in note_debug:
+                                     print(f"DEBUG: noteDetailMap entries: {list(note_debug['noteDetailMap'].keys())}")
+                        except Exception as e:
+                            print(f"DEBUG: HTML解析异常: {e}")
                             pass
 
                 if data is None:

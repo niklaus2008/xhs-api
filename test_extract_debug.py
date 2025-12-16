@@ -23,7 +23,7 @@ def extract_by_balance(text, start_marker):
     return None
 
 def test_extract():
-    with open("debug_failed.html", "r", encoding="utf-8") as f:
+    with open("debug_failed_new.html", "r", encoding="utf-8") as f:
         html = f.read()
     
     json_str = extract_by_balance(html, "window.__INITIAL_STATE__=")
