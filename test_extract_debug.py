@@ -28,13 +28,24 @@ def test_extract():
     
     json_str = extract_by_balance(html, "window.__INITIAL_STATE__=")
     if json_str:
+        # 模拟 main.py 的处理逻辑
+        json_str = json_str.replace("undefined", "null")
+        
         print(f"Extracted length: {len(json_str)}")
         try:
             data = json.loads(json_str)
             print("JSON decode success!")
+            print(f"Top-level keys: {list(data.keys())}")
+            
             # 打印一下笔记信息验证
             note = data.get('note', {})
-            print(f"Note keys: {note.keys()}")
+            print(f"Note keys: {list(note.keys())}")
+            
+            print(f"noteDetailMap content: {note.get('noteDetailMap')}")
+            print(f"firstNoteId content: {note.get('firstNoteId')}")
+
+            if 'user' in data:
+                print(f"User info: {data['user']}")
         except Exception as e:
             print(f"JSON decode failed: {e}")
             if hasattr(e, 'pos'):

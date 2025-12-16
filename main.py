@@ -338,8 +338,8 @@ def _has_note_detail(data: dict[str, Any]) -> bool:
         note_data = data.get("note", {}).get("noteDetailMap", {})
         if isinstance(note_data, dict) and note_data:
             return True
-        note_data = data.get("note", {}).get("firstNoteId", {})
-        return isinstance(note_data, dict) and bool(note_data)
+        # remove weak check for firstNoteId as it might be present but empty/invalid in some states
+        return False
     except Exception:
         return False
 
@@ -397,7 +397,14 @@ def parse_xhs(url: str):
         # 优先从运行时提取（适配“壳页面 + 外链脚本”场景）
         runtime_data = _try_get_initial_data_from_runtime(page, timeout_sec=8)
         if runtime_data is not None:
-            data = runtime_data
+            # 关键：检查运行时数据是否完整。如果缺笔记详情，说明可能遇到风控或加载不全，
+            # 此时不要直接采信，而是尝试去 HTML 里或者 script 标签里找（那里往往有完整数据）。
+            if _has_note_detail(runtime_data):
+                data = runtime_data
+                print("3. 使用运行时数据 (Runtime Data)")
+            else:
+                print("3. 运行时数据缺失笔记详情，尝试降级到静态解析...")
+                data = None
         else:
             # 优先尝试 Next.js 常见的 __NEXT_DATA__
             next_data_ele = page.ele('xpath://script[@id="__NEXT_DATA__"]')
